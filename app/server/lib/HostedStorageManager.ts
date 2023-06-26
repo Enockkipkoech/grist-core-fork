@@ -1,40 +1,51 @@
-import * as sqlite3 from '@gristlabs/sqlite3';
-import {ApiError} from 'app/common/ApiError';
-import {mapGetOrSet} from 'app/common/AsyncCreate';
-import {delay} from 'app/common/delay';
-import {DocEntry} from 'app/common/DocListAPI';
-import {DocSnapshots} from 'app/common/DocSnapshot';
-import {DocumentUsage} from 'app/common/DocUsage';
-import {buildUrlId, parseUrlId} from 'app/common/gristUrls';
-import {KeyedOps} from 'app/common/KeyedOps';
-import {DocReplacementOptions, NEW_DOCUMENT_CODE} from 'app/common/UserAPI';
-import {HomeDBManager} from 'app/gen-server/lib/HomeDBManager';
-import {checksumFile} from 'app/server/lib/checksumFile';
-import {DocSnapshotInventory, DocSnapshotPruner} from 'app/server/lib/DocSnapshots';
-import {IDocWorkerMap} from 'app/server/lib/DocWorkerMap';
-import {ChecksummedExternalStorage, DELETED_TOKEN, ExternalStorage, Unchanged} from 'app/server/lib/ExternalStorage';
-import {HostedMetadataManager} from 'app/server/lib/HostedMetadataManager';
-import {ICreate} from 'app/server/lib/ICreate';
-import {IDocStorageManager} from 'app/server/lib/IDocStorageManager';
-import {LogMethods} from "app/server/lib/LogMethods";
-import {fromCallback} from 'app/server/lib/serverUtils';
-import * as fse from 'fs-extra';
-import * as path from 'path';
+import * as sqlite3 from "@gristlabs/sqlite3";
+import { ApiError } from "app/common/ApiError";
+import { mapGetOrSet } from "app/common/AsyncCreate";
+import { delay } from "app/common/delay";
+import { DocEntry } from "app/common/DocListAPI";
+import { DocSnapshots } from "app/common/DocSnapshot";
+import { DocumentUsage } from "app/common/DocUsage";
+import { buildUrlId, parseUrlId } from "app/common/gristUrls";
+import { KeyedOps } from "app/common/KeyedOps";
+import { DocReplacementOptions, NEW_DOCUMENT_CODE } from "app/common/UserAPI";
+import { HomeDBManager } from "app/gen-server/lib/HomeDBManager";
+import { checksumFile } from "app/server/lib/checksumFile";
+import {
+  DocSnapshotInventory,
+  DocSnapshotPruner,
+} from "app/server/lib/DocSnapshots";
+import { IDocWorkerMap } from "app/server/lib/DocWorkerMap";
+import {
+  ChecksummedExternalStorage,
+  DELETED_TOKEN,
+  ExternalStorage,
+  Unchanged,
+} from "app/server/lib/ExternalStorage";
+import { HostedMetadataManager } from "app/server/lib/HostedMetadataManager";
+import { ICreate } from "app/server/lib/ICreate";
+import { IDocStorageManager } from "app/server/lib/IDocStorageManager";
+import { LogMethods } from "app/server/lib/LogMethods";
+import { fromCallback } from "app/server/lib/serverUtils";
+import * as fse from "fs-extra";
+import * as path from "path";
 import uuidv4 from "uuid/v4";
-import { OpenMode, SQLiteDB } from './SQLiteDB';
+import { OpenMode, SQLiteDB } from "./SQLiteDB";
 
 // Check for a valid document id.
 const docIdRegex = /^[-=_\w~%]+$/;
 
 // Wait this long after a change to the document before trying to make a backup of it.
-const GRIST_BACKUP_DELAY_SECS = parseInt(process.env.GRIST_BACKUP_DELAY_SECS || '15', 10);
+const GRIST_BACKUP_DELAY_SECS = parseInt(
+  process.env.GRIST_BACKUP_DELAY_SECS || "15",
+  10
+);
 
 // This constant controls how many pages of the database we back up in a single step.
 // The larger it is, the faster the backup overall, but the slower each step is.
 // Slower steps result in longer periods when the database is locked, without any
 // opportunity for a waiting client to get in and make a write.
 // The size of a page, as far as sqlite is concerned, is 4096 bytes.
-const PAGES_TO_BACKUP_PER_STEP = 1024;  // Backup is made in 4MB chunks.
+const PAGES_TO_BACKUP_PER_STEP = 1024; // Backup is made in 4MB chunks.
 
 // Between steps of the backup, we pause in case a client is waiting to make a write.
 // The shorter the pause, the greater the odds that the client won't be able to make
@@ -55,13 +66,13 @@ export interface HostedStorageOptions {
   // which may then be wrapped in additional layer(s) of ExternalStorage.
   // See ICreate.ExternalStorage.
   // Uses S3 by default in hosted Grist.
-  externalStorageCreator?: (purpose: 'doc'|'meta') => ExternalStorage;
+  externalStorageCreator?: (purpose: "doc" | "meta") => ExternalStorage;
 }
 
 const defaultOptions: HostedStorageOptions = {
   secondsBeforePush: GRIST_BACKUP_DELAY_SECS,
   secondsBeforeFirstRetry: 3.0,
-  pushDocUpdateTimes: true
+  pushDocUpdateTimes: true,
 };
 
 /**
@@ -80,9 +91,8 @@ const defaultOptions: HostedStorageOptions = {
  * TODO: Add an explicit createFlag in DocStatus for clarity and simplification.
  */
 export class HostedStorageManager implements IDocStorageManager {
-
   // Handles pushing doc metadata changes when the doc is updated.
-  private _metadataManager: HostedMetadataManager|null = null;
+  private _metadataManager: HostedMetadataManager | null = null;
 
   // Maps docId to the promise for when the document is present on the local filesystem.
   private _localFiles = new Map<string, Promise<boolean>>();
@@ -113,13 +123,16 @@ export class HostedStorageManager implements IDocStorageManager {
   // Set once the manager has been closed.
   private _closed: boolean = false;
 
-  private _baseStore: ExternalStorage;  // External store for documents, without checksumming.
+  private _baseStore: ExternalStorage; // External store for documents, without checksumming.
 
   // Latest version ids of documents.
   private _latestVersions = new Map<string, string>();
   private _latestMetaVersions = new Map<string, string>();
 
-  private _log = new LogMethods('HostedStorageManager ', (docId: string|null) => ({docId}));
+  private _log = new LogMethods(
+    "HostedStorageManager ",
+    (docId: string | null) => ({ docId })
+  );
 
   /**
    * Initialize with the given root directory, which should be a fully-resolved path.
@@ -134,58 +147,77 @@ export class HostedStorageManager implements IDocStorageManager {
     create: ICreate,
     options: HostedStorageOptions = defaultOptions
   ) {
-    const creator = options.externalStorageCreator || ((purpose) => create.ExternalStorage(purpose, ''));
+    const creator =
+      options.externalStorageCreator ||
+      ((purpose) => create.ExternalStorage(purpose, ""));
     // We store documents either in a test store, or in an s3 store
     // at s3://<s3Bucket>/<s3Prefix><docId>.grist
-    const externalStoreDoc = this._disableS3 ? undefined : creator('doc');
-    if (!externalStoreDoc) { this._disableS3 = true; }
+    const externalStoreDoc = this._disableS3 ? undefined : creator("doc");
+    if (!externalStoreDoc) {
+      this._disableS3 = true;
+    }
     const secondsBeforePush = options.secondsBeforePush;
     if (options.pushDocUpdateTimes) {
       this._metadataManager = new HostedMetadataManager(dbManager);
     }
-    this._uploads = new KeyedOps(key => this._pushToS3(key), {
+    this._uploads = new KeyedOps((key) => this._pushToS3(key), {
       delayBeforeOperationMs: secondsBeforePush * 1000,
       retry: true,
       logError: (key, failureCount, err) => {
-        this._log.error(null, "error pushing %s (%d): %s", key, failureCount, err);
-      }
+        this._log.error(
+          null,
+          "error pushing %s (%d): %s",
+          key,
+          failureCount,
+          err
+        );
+      },
     });
 
     if (!this._disableS3) {
       this._baseStore = externalStoreDoc!;
       // Whichever store we have, we use checksums to deal with
       // eventual consistency.
-      this._ext = this._getChecksummedExternalStorage('doc', this._baseStore,
-                                                      this._latestVersions, options);
+      this._ext = this._getChecksummedExternalStorage(
+        "doc",
+        this._baseStore,
+        this._latestVersions,
+        options
+      );
 
-      const baseStoreMeta = creator('meta');
+      const baseStoreMeta = creator("meta");
       if (!baseStoreMeta) {
-        throw new Error('bug: external storage should be created for "meta" if it is created for "doc"');
+        throw new Error(
+          'bug: external storage should be created for "meta" if it is created for "doc"'
+        );
       }
-      this._extMeta = this._getChecksummedExternalStorage('meta', baseStoreMeta,
-                                                          this._latestMetaVersions,
-                                                          options);
+      this._extMeta = this._getChecksummedExternalStorage(
+        "meta",
+        baseStoreMeta,
+        this._latestMetaVersions,
+        options
+      );
 
       this._inventory = new DocSnapshotInventory(
         this._ext,
         this._extMeta,
-        async docId => {
+        async (docId) => {
           const dir = this.getAssetPath(docId);
           await fse.mkdirp(dir);
-          return path.join(dir, 'meta.json');
+          return path.join(dir, "meta.json");
         },
-        async docId => {
+        async (docId) => {
           const product = await dbManager.getDocProduct(docId);
           return product?.features.snapshotWindow;
-        },
+        }
       );
 
       // The pruner could use an inconsistent store without any real loss overall,
       // but tests are easier if it is consistent.
       this._pruner = new DocSnapshotPruner(this._inventory, {
-        delayBeforeOperationMs: 0,  // prune as soon as we've made a first upload.
-        minDelayBetweenOperationsMs: secondsBeforePush * 4000,  // ... but wait awhile before
-                                                                // pruning again.
+        delayBeforeOperationMs: 0, // prune as soon as we've made a first upload.
+        minDelayBetweenOperationsMs: secondsBeforePush * 4000, // ... but wait awhile before
+        // pruning again.
       });
     }
   }
@@ -195,24 +227,28 @@ export class HostedStorageManager implements IDocStorageManager {
    * the object is written in S3 - so no need to worry about consistency.
    */
   public async addToStorage(docId: string) {
-    if (this._disableS3) { return; }
+    if (this._disableS3) {
+      return;
+    }
     this._uploads.addOperation(docId);
     await this._uploads.expediteOperationAndWait(docId);
   }
 
   public getPath(docName: string): string {
-    return this.getAssetPath(docName) + '.grist';
+    return this.getAssetPath(docName) + ".grist";
   }
 
   // Where to store files related to a document locally.  Document goes in <assetPath>.grist,
   // and other files go in <assetPath>/ directory.
   public getAssetPath(docName: string): string {
     checkValidDocId(docName);
-    return path.join(this._docsRoot, path.basename(docName, '.grist'));
+    return path.join(this._docsRoot, path.basename(docName, ".grist"));
   }
 
   // We don't deal with sample docs
-  public getSampleDocPath(sampleDocName: string): string|null { return null; }
+  public getSampleDocPath(sampleDocName: string): string | null {
+    return null;
+  }
 
   /**
    * Translates a possibly non-canonical docName to a canonical one. Returns a bare docId,
@@ -220,7 +256,7 @@ export class HostedStorageManager implements IDocStorageManager {
    * ever be used, but stripping seems better than asserting.)
    */
   public async getCanonicalDocName(altDocName: string): Promise<string> {
-    return path.basename(altDocName, '.grist');
+    return path.basename(altDocName, ".grist");
   }
 
   /**
@@ -231,13 +267,18 @@ export class HostedStorageManager implements IDocStorageManager {
    *
    * The optional srcDocName parameter is set when preparing a fork.
    */
-  public async prepareLocalDoc(docName: string, srcDocName?: string): Promise<boolean> {
+  public async prepareLocalDoc(
+    docName: string,
+    srcDocName?: string
+  ): Promise<boolean> {
     // We could be reopening a document that is still closing down.
     // Wait for that to happen.  TODO: we could also try to interrupt the closing-down process.
     await this.closeDocument(docName);
 
     if (this._prepareFiles.has(docName)) {
-      throw new Error(`Tried to call prepareLocalDoc('${docName}') twice in parallel`);
+      throw new Error(
+        `Tried to call prepareLocalDoc('${docName}') twice in parallel`
+      );
     }
 
     try {
@@ -250,7 +291,7 @@ export class HostedStorageManager implements IDocStorageManager {
   }
 
   public async prepareToCreateDoc(docName: string): Promise<void> {
-    await this.prepareLocalDoc(docName, 'new');
+    await this.prepareLocalDoc(docName, "new");
     if (this._inventory) {
       await this._inventory.create(docName);
       await this._onInventoryChange(docName);
@@ -262,11 +303,14 @@ export class HostedStorageManager implements IDocStorageManager {
    * Initialize one document from another, associating the result with the current
    * worker.
    */
-  public async prepareFork(srcDocName: string, destDocName: string): Promise<string> {
+  public async prepareFork(
+    srcDocName: string,
+    destDocName: string
+  ): Promise<string> {
     await this.prepareLocalDoc(destDocName, srcDocName);
-    this.markAsChanged(destDocName);  // Make sure fork is actually stored in S3, even
-                                      // if no changes are made, since we'd refuse to
-                                      // create it later.
+    this.markAsChanged(destDocName); // Make sure fork is actually stored in S3, even
+    // if no changes are made, since we'd refuse to
+    // create it later.
     return this.getPath(destDocName);
   }
 
@@ -276,12 +320,15 @@ export class HostedStorageManager implements IDocStorageManager {
   public async getCopy(docName: string): Promise<string> {
     const present = await this._claimDocument(docName);
     if (!present) {
-      throw new Error('cannot copy document that does not exist yet');
+      throw new Error("cannot copy document that does not exist yet");
     }
     return await this._prepareBackup(docName, uuidv4());
   }
 
-  public async replace(docId: string, options: DocReplacementOptions): Promise<void> {
+  public async replace(
+    docId: string,
+    options: DocReplacementOptions
+  ): Promise<void> {
     // Make sure the current version of the document is flushed.
     await this.flushDoc(docId);
 
@@ -289,15 +336,17 @@ export class HostedStorageManager implements IDocStorageManager {
     // remove any snapshotId embedded in the document id.
     const rawSourceDocId = options.sourceDocId || docId;
     const parts = parseUrlId(rawSourceDocId);
-    const sourceDocId = buildUrlId({...parts, snapshotId: undefined});
+    const sourceDocId = buildUrlId({ ...parts, snapshotId: undefined });
     const snapshotId = options.snapshotId || parts.snapshotId;
 
-    if (sourceDocId === docId && !snapshotId) { return; }
+    if (sourceDocId === docId && !snapshotId) {
+      return;
+    }
 
     // Basic implementation for when S3 is not available.
     if (this._disableS3) {
       if (snapshotId) {
-        throw new Error('snapshots not supported without S3');
+        throw new Error("snapshots not supported without S3");
       }
       if (await fse.pathExists(this.getPath(sourceDocId))) {
         await fse.copy(this.getPath(sourceDocId), this.getPath(docId));
@@ -318,18 +367,18 @@ export class HostedStorageManager implements IDocStorageManager {
     }
     try {
       // Fetch new content from S3.
-      if (!await this._fetchFromS3(docId, {sourceDocId, snapshotId})) {
-        throw new Error('Cannot fetch document');
+      if (!(await this._fetchFromS3(docId, { sourceDocId, snapshotId }))) {
+        throw new Error("Cannot fetch document");
       }
       // Make sure the new content is considered new.
       // NOTE: fse.remove succeeds also when the file does not exist.
       await fse.remove(this._getHashFile(this.getPath(docId)));
-      this.markAsChanged(docId, 'edit');
+      this.markAsChanged(docId, "edit");
       // Invalidate usage; it'll get re-computed the next time the document is opened.
       this.scheduleUsageUpdate(docId, null, true);
     } catch (err) {
       this._log.error(docId, "problem replacing doc: %s", err);
-      await fse.move(tmpPath, docPath, {overwrite: true});
+      await fse.move(tmpPath, docPath, { overwrite: true });
       throw err;
     } finally {
       // NOTE: fse.remove succeeds also when the file does not exist.
@@ -340,11 +389,18 @@ export class HostedStorageManager implements IDocStorageManager {
   }
 
   // We don't deal with listing documents.
-  public async listDocs(): Promise<DocEntry[]> { return []; }
+  public async listDocs(): Promise<DocEntry[]> {
+    return [];
+  }
 
-  public async deleteDoc(docName: string, deletePermanently?: boolean): Promise<void> {
+  public async deleteDoc(
+    docName: string,
+    deletePermanently?: boolean
+  ): Promise<void> {
     if (!deletePermanently) {
-      throw new Error("HostedStorageManager only implements permanent deletion in deleteDoc");
+      throw new Error(
+        "HostedStorageManager only implements permanent deletion in deleteDoc"
+      );
     }
     await this.closeDocument(docName);
     if (!this._disableS3) {
@@ -353,8 +409,8 @@ export class HostedStorageManager implements IDocStorageManager {
     }
     // NOTE: fse.remove succeeds also when the file does not exist.
     await fse.remove(this.getPath(docName));
-    await fse.remove(this._getHashFile(this.getPath(docName), 'doc'));
-    await fse.remove(this._getHashFile(this.getPath(docName), 'meta'));
+    await fse.remove(this._getHashFile(this.getPath(docName), "doc"));
+    await fse.remove(this._getHashFile(this.getPath(docName), "meta"));
     await fse.remove(this.getAssetPath(docName));
   }
 
@@ -376,9 +432,9 @@ export class HostedStorageManager implements IDocStorageManager {
     await this.flushDoc(docName);
     // TODO: make an alternative way to store backups if operating without an external
     // store.
-    return this._ext ?
-      (this._ext.url(docName) + ' (' + this._latestVersions.get(docName) + ')') :
-      'no-external-storage-enabled';
+    return this._ext
+      ? this._ext.url(docName) + " (" + this._latestVersions.get(docName) + ")"
+      : "no-external-storage-enabled";
   }
 
   /**
@@ -392,19 +448,29 @@ export class HostedStorageManager implements IDocStorageManager {
    * Close the storage manager.  Make sure any pending changes reach S3 first.
    */
   public async closeStorage(): Promise<void> {
-    await this._uploads.wait(() =>  this._log.info(null, 'waiting for closeStorage to finish'));
+    await this._uploads.wait(() =>
+      this._log.info(null, "waiting for closeStorage to finish")
+    );
 
     // Close metadata manager.
-    if (this._metadataManager) { await this._metadataManager.close(); }
+    if (this._metadataManager) {
+      await this._metadataManager.close();
+    }
 
     // Finish up everything incoming.  This is most relevant for tests.
     // Wait for any downloads to wind up, since there's no easy way to cancel them.
-    while (this._prepareFiles.size > 0) { await delay(100); }
+    while (this._prepareFiles.size > 0) {
+      await delay(100);
+    }
     await Promise.all(this._localFiles.values());
 
     this._closed = true;
-    if (this._ext) { await this._ext.close(); }
-    if (this._pruner) { await this._pruner.close(); }
+    if (this._ext) {
+      await this._ext.close();
+    }
+    if (this._pruner) {
+      await this._pruner.close();
+    }
   }
 
   /**
@@ -415,7 +481,9 @@ export class HostedStorageManager implements IDocStorageManager {
   }
 
   public async testWaitForPrunes() {
-    if (this._pruner) { await this._pruner.wait(); }
+    if (this._pruner) {
+      await this._pruner.wait();
+    }
   }
 
   /**
@@ -427,14 +495,18 @@ export class HostedStorageManager implements IDocStorageManager {
 
   // return true if document and inventory is backed up to external store (if attached).
   public isAllSaved(docName: string): boolean {
-    return !this._uploads.hasPendingOperation(docName) &&
-      (this._inventory ? this._inventory.isSaved(docName) : true);
+    return (
+      !this._uploads.hasPendingOperation(docName) &&
+      (this._inventory ? this._inventory.isSaved(docName) : true)
+    );
   }
 
   // pick up the pace of pushing to s3, from leisurely to urgent.
   public prepareToCloseStorage() {
     if (this._pruner) {
-      this._pruner.close().catch(e => this._log.error(null, "pruning error %s", e));
+      this._pruner
+        .close()
+        .catch((e) => this._log.error(null, "pruning error %s", e));
     }
     this._uploads.expediteOperations();
   }
@@ -462,7 +534,7 @@ export class HostedStorageManager implements IDocStorageManager {
    */
   public async flushDoc(docName: string): Promise<void> {
     while (!this.isAllSaved(docName)) {
-      this._log.info(docName, 'waiting for document to finish');
+      this._log.info(docName, "waiting for document to finish");
       await this._uploads.expediteOperationAndWait(docName);
       await this._inventory?.flush(docName);
       if (!this.isAllSaved(docName)) {
@@ -479,16 +551,24 @@ export class HostedStorageManager implements IDocStorageManager {
     const timestamp = new Date().toISOString();
     this._timestamps.set(docName, timestamp);
     try {
-      if (parseUrlId(docName).snapshotId) { return; }
+      if (parseUrlId(docName).snapshotId) {
+        return;
+      }
       if (this._localFiles.has(docName)) {
         // Make sure the file is marked as locally present (it may be newly created).
         this._localFiles.set(docName, Promise.resolve(true));
       }
-      if (this._disableS3) { return; }
-      if (this._closed) { throw new Error("HostedStorageManager.markAsChanged called after closing"); }
+      if (this._disableS3) {
+        return;
+      }
+      if (this._closed) {
+        throw new Error(
+          "HostedStorageManager.markAsChanged called after closing"
+        );
+      }
       this._uploads.addOperation(docName);
     } finally {
-      if (reason === 'edit') {
+      if (reason === "edit") {
         this._markAsEdited(docName, timestamp);
       }
     }
@@ -502,15 +582,17 @@ export class HostedStorageManager implements IDocStorageManager {
    */
   public scheduleUsageUpdate(
     docName: string,
-    docUsage: DocumentUsage|null,
+    docUsage: DocumentUsage | null,
     minimizeDelay = false
   ): void {
-    const {forkId, snapshotId} = parseUrlId(docName);
-    if (!this._metadataManager || forkId || snapshotId) { return; }
+    const { forkId, snapshotId } = parseUrlId(docName);
+    if (!this._metadataManager || forkId || snapshotId) {
+      return;
+    }
 
     this._metadataManager.scheduleUpdate(
       docName,
-      {usage: docUsage},
+      { usage: docUsage },
       minimizeDelay
     );
   }
@@ -522,33 +604,45 @@ export class HostedStorageManager implements IDocStorageManager {
     return this._uploads.hasPendingOperations();
   }
 
-  public async removeSnapshots(docName: string, snapshotIds: string[]): Promise<void> {
-    if (this._disableS3) { return; }
+  public async removeSnapshots(
+    docName: string,
+    snapshotIds: string[]
+  ): Promise<void> {
+    if (this._disableS3) {
+      return;
+    }
     await this._pruner.prune(docName, snapshotIds);
   }
 
-  public async getSnapshots(docName: string, skipMetadataCache?: boolean): Promise<DocSnapshots> {
+  public async getSnapshots(
+    docName: string,
+    skipMetadataCache?: boolean
+  ): Promise<DocSnapshots> {
     if (this._disableS3) {
       return {
-        snapshots: [{
-          snapshotId: 'current',
-          lastModified: new Date().toISOString(),
-          docId: docName,
-        }]
+        snapshots: [
+          {
+            snapshotId: "current",
+            lastModified: new Date().toISOString(),
+            docId: docName,
+          },
+        ],
       };
     }
-    const versions = skipMetadataCache ?
-      await this._ext.versions(docName) :
-      await this._inventory.versions(docName, this._latestVersions.get(docName) || null);
+    const versions = skipMetadataCache
+      ? await this._ext.versions(docName)
+      : await this._inventory.versions(
+          docName,
+          this._latestVersions.get(docName) || null
+        );
     const parts = parseUrlId(docName);
     return {
-      snapshots: versions
-        .map(v => {
-          return {
-            ...v,
-            docId: buildUrlId({...parts, snapshotId: v.snapshotId}),
-          };
-        })
+      snapshots: versions.map((v) => {
+        return {
+          ...v,
+          docId: buildUrlId({ ...parts, snapshotId: v.snapshotId }),
+        };
+      }),
     };
   }
 
@@ -556,14 +650,18 @@ export class HostedStorageManager implements IDocStorageManager {
    * This is called when a document was edited by the user.
    */
   private _markAsEdited(docName: string, timestamp: string): void {
-    if (!this._metadataManager) { return; }
+    if (!this._metadataManager) {
+      return;
+    }
 
-    const {forkId, snapshotId} = parseUrlId(docName);
-    if (snapshotId) { return; }
+    const { forkId, snapshotId } = parseUrlId(docName);
+    if (snapshotId) {
+      return;
+    }
 
     // Schedule a metadata update for the modified doc.
     const docId = forkId || docName;
-    this._metadataManager.scheduleUpdate(docId, {updatedAt: timestamp});
+    this._metadataManager.scheduleUpdate(docId, { updatedAt: timestamp });
   }
 
   /**
@@ -578,33 +676,53 @@ export class HostedStorageManager implements IDocStorageManager {
    * If srcDocName is 'new', checks for the document in external storage
    * are skipped.
    */
-  private async _claimDocument(docName: string,
-                               srcDocName?: string): Promise<boolean> {
+  private async _claimDocument(
+    docName: string,
+    srcDocName?: string
+  ): Promise<boolean> {
     // AsyncCreate.mapGetOrSet ensures we don't start multiple promises to talk to S3/Redis
     // and that we clean up the failed key in case of failure.
     return mapGetOrSet(this._localFiles, docName, async () => {
-      if (this._closed) { throw new Error("HostedStorageManager._ensureDocumentIsPresent called after closing"); }
+      if (this._closed) {
+        throw new Error(
+          "HostedStorageManager._ensureDocumentIsPresent called after closing"
+        );
+      }
       checkValidDocId(docName);
 
-      const {trunkId, forkId, snapshotId} = parseUrlId(docName);
+      const { trunkId, forkId, snapshotId } = parseUrlId(docName);
 
       const canCreateFork = Boolean(srcDocName);
 
-      const docStatus = await this._docWorkerMap.getDocWorkerOrAssign(docName, this._docWorkerId);
-      if (!docStatus.isActive) { throw new Error(`Doc is not active on a DocWorker: ${docName}`); }
+      const docStatus = await this._docWorkerMap.getDocWorkerOrAssign(
+        docName,
+        this._docWorkerId
+      );
+      if (!docStatus.isActive) {
+        throw new Error(`Doc is not active on a DocWorker: ${docName}`);
+      }
       if (docStatus.docWorker.id !== this._docWorkerId) {
-        throw new Error(`Doc belongs to a different DocWorker (${docStatus.docWorker.id}): ${docName}`);
+        throw new Error(
+          `Doc belongs to a different DocWorker (${docStatus.docWorker.id}): ${docName}`
+        );
       }
 
-      if (srcDocName === 'new') { return false; }
+      if (srcDocName === "new") {
+        return false;
+      }
 
       if (this._disableS3) {
         // skip S3, just use file system
         let present: boolean = await fse.pathExists(this.getPath(docName));
         if ((forkId || snapshotId) && !present) {
-          if (!canCreateFork) { throw new ApiError("Document fork not found", 404); }
-          if (snapshotId && snapshotId !== 'current') {
-            throw new ApiError(`cannot find snapshot ${snapshotId} of ${docName}`, 404);
+          if (!canCreateFork) {
+            throw new ApiError("Document fork not found", 404);
+          }
+          if (snapshotId && snapshotId !== "current") {
+            throw new ApiError(
+              `cannot find snapshot ${snapshotId} of ${docName}`,
+              404
+            );
           }
           if (await fse.pathExists(this.getPath(trunkId))) {
             await fse.copy(this.getPath(trunkId), this.getPath(docName));
@@ -632,12 +750,19 @@ export class HostedStorageManager implements IDocStorageManager {
         } else {
           // Doc exists locally and in S3 (according to redis).
           // Make sure the checksum matches.
-          const checksum = await this._getHash(await this._prepareBackup(docName));
+          const checksum = await this._getHash(
+            await this._prepareBackup(docName)
+          );
           if (checksum === docStatus.docMD5) {
             // Fine, accept the doc as existing on our file system.
             return true;
           } else {
-            this._log.info(docName, "Local hash does not match redis: %s vs %s", checksum, docStatus.docMD5);
+            this._log.info(
+              docName,
+              "Local hash does not match redis: %s vs %s",
+              checksum,
+              docStatus.docMD5
+            );
             // The file that exists locally does not match S3.  But S3 is the canonical version.
             // On the assumption that the local file is outdated, delete it.
             // TODO: may want to be more careful in case the local file has modifications that
@@ -648,7 +773,9 @@ export class HostedStorageManager implements IDocStorageManager {
       }
       return this._fetchFromS3(docName, {
         sourceDocId: srcDocName,
-        trunkId: forkId ? trunkId : undefined, snapshotId, canCreateFork
+        trunkId: forkId ? trunkId : undefined,
+        snapshotId,
+        canCreateFork,
       });
     });
   }
@@ -659,8 +786,8 @@ export class HostedStorageManager implements IDocStorageManager {
   private async _wipeCache(docName: string) {
     // NOTE: fse.remove succeeds also when the file does not exist.
     await fse.remove(this.getPath(docName));
-    await fse.remove(this._getHashFile(this.getPath(docName), 'doc'));
-    await fse.remove(this._getHashFile(this.getPath(docName), 'meta'));
+    await fse.remove(this._getHashFile(this.getPath(docName), "doc"));
+    await fse.remove(this._getHashFile(this.getPath(docName), "meta"));
     await this._inventory.clear(docName);
     this._latestVersions.delete(docName);
     this._latestMetaVersions.delete(docName);
@@ -678,22 +805,43 @@ export class HostedStorageManager implements IDocStorageManager {
    * Forks of fork will not spark joy at this time.  An attempt to
    * fork a fork will result in a new fork of the original trunk.
    */
-  private async _fetchFromS3(destId: string, options: {sourceDocId?: string,
-                                                       trunkId?: string,
-                                                       snapshotId?: string,
-                                                       canCreateFork?: boolean}): Promise<boolean> {
-    const destIdWithoutSnapshot = buildUrlId({...parseUrlId(destId), snapshotId: undefined});
+  private async _fetchFromS3(
+    destId: string,
+    options: {
+      sourceDocId?: string;
+      trunkId?: string;
+      snapshotId?: string;
+      canCreateFork?: boolean;
+    }
+  ): Promise<boolean> {
+    const destIdWithoutSnapshot = buildUrlId({
+      ...parseUrlId(destId),
+      snapshotId: undefined,
+    });
     let sourceDocId = options.sourceDocId || destIdWithoutSnapshot;
-    if (!await this._ext.exists(destIdWithoutSnapshot)) {
-      if (!options.trunkId) { return false; }   // Document not found in S3
+    if (!(await this._ext.exists(destIdWithoutSnapshot))) {
+      if (!options.trunkId) {
+        return false;
+      } // Document not found in S3
       // No such fork in s3 yet, try from trunk (if we are allowed to create the fork).
-      if (!options.canCreateFork) { throw new ApiError("Document fork not found", 404); }
+      if (!options.canCreateFork) {
+        throw new ApiError("Document fork not found", 404);
+      }
       // The special NEW_DOCUMENT_CODE trunk means we should create an empty document.
-      if (options.trunkId === NEW_DOCUMENT_CODE) { return false; }
-      if (!await this._ext.exists(options.trunkId)) { throw new ApiError('Cannot find original', 404); }
+      if (options.trunkId === NEW_DOCUMENT_CODE) {
+        return false;
+      }
+      if (!(await this._ext.exists(options.trunkId))) {
+        throw new ApiError("Cannot find original", 404);
+      }
       sourceDocId = options.trunkId;
     }
-    await this._ext.downloadTo(sourceDocId, destId, this.getPath(destId), options.snapshotId);
+    await this._ext.downloadTo(
+      sourceDocId,
+      destId,
+      this.getPath(destId),
+      options.snapshotId
+    );
     return true;
   }
 
@@ -701,13 +849,13 @@ export class HostedStorageManager implements IDocStorageManager {
    * Get a checksum for the given file (absolute path).
    */
   private _getHash(srcPath: string): Promise<string> {
-    return checksumFile(srcPath, 'md5');
+    return checksumFile(srcPath, "md5");
   }
 
   /**
    * We'll save hashes in a file with the suffix -hash.
    */
-  private _getHashFile(docPath: string, family: string = 'doc'): string {
+  private _getHashFile(docPath: string, family: string = "doc"): string {
     return docPath + `-hash-${family}`;
   }
 
@@ -717,21 +865,26 @@ export class HostedStorageManager implements IDocStorageManager {
    * is never locked for long by the backup.  The backup process will survive
    * transient locks on the db.
    */
-  private async _prepareBackup(docId: string, postfix: string = 'backup'): Promise<string> {
+  private async _prepareBackup(
+    docId: string,
+    postfix: string = "backup"
+  ): Promise<string> {
     const docPath = this.getPath(docId);
     const tmpPath = `${docPath}-${postfix}`;
-    return backupSqliteDatabase(docPath, tmpPath, undefined, postfix, {docId});
+    return backupSqliteDatabase(docPath, tmpPath, undefined, postfix, {
+      docId,
+    });
   }
 
   /**
    * Send a document to S3.
    */
   private async _pushToS3(docId: string): Promise<void> {
-    let tmpPath: string|null = null;
+    let tmpPath: string | null = null;
 
     try {
       if (this._prepareFiles.has(docId)) {
-        throw new Error('too soon to consider pushing');
+        throw new Error("too soon to consider pushing");
       }
       tmpPath = await this._prepareBackup(docId);
       const docMetadata = await this._getDocMetadata(tmpPath);
@@ -741,25 +894,29 @@ export class HostedStorageManager implements IDocStorageManager {
       // Keep metadata keys simple, short, and lowercase.
       const metadata = {
         ...docMetadata,
-        ...label && {label},
+        ...(label && { label }),
         t,
       };
       let changeMade: boolean = false;
       await this._inventory.uploadAndAdd(docId, async () => {
         const prevSnapshotId = this._latestVersions.get(docId) || null;
-        const newSnapshotId = await this._ext.upload(docId, tmpPath as string, metadata);
+        const newSnapshotId = await this._ext.upload(
+          docId,
+          tmpPath as string,
+          metadata
+        );
         if (newSnapshotId === Unchanged) {
           // Nothing uploaded because nothing changed
           return { prevSnapshotId };
         }
         if (!newSnapshotId) {
           // This is unexpected.
-          throw new Error('No snapshotId allocated after upload');
+          throw new Error("No snapshotId allocated after upload");
         }
         const snapshot = {
           lastModified: t,
           snapshotId: newSnapshotId,
-          metadata
+          metadata,
         };
         changeMade = true;
         return { snapshot, prevSnapshotId };
@@ -770,7 +927,9 @@ export class HostedStorageManager implements IDocStorageManager {
     } finally {
       // Clean up backup.
       // NOTE: fse.remove succeeds also when the file does not exist.
-      if (tmpPath) { await fse.remove(tmpPath); }
+      if (tmpPath) {
+        await fse.remove(tmpPath);
+      }
     }
   }
 
@@ -783,24 +942,37 @@ export class HostedStorageManager implements IDocStorageManager {
   }
 
   // Extract actionHash, actionNum, and timezone from a document backup.
-  private async _getDocMetadata(fname: string): Promise<{[key: string]: string}> {
+  private async _getDocMetadata(
+    fname: string
+  ): Promise<{ [key: string]: string }> {
     const result: Record<string, string> = {};
     const db = await SQLiteDB.openDBRaw(fname, OpenMode.OPEN_READONLY);
     try {
-      const actionQuery = await db.get('select actionHash, actionNum from _gristsys_ActionHistoryBranch as b ' +
-                                       'left join _gristsys_ActionHistory as h on h.id = b.actionRef ' +
-                                       'where b.name = ?', 'shared');
+      const actionQuery = await db.get(
+        "select actionHash, actionNum from _gristsys_ActionHistoryBranch as b " +
+          "left join _gristsys_ActionHistory as h on h.id = b.actionRef " +
+          "where b.name = ?",
+        "shared"
+      );
       const h = actionQuery?.actionHash;
-      if (h) { result.h = h; }
+      if (h) {
+        result.h = h;
+      }
       const n = actionQuery?.actionNum;
-      if (n) { result.n = String(n); }
+      if (n) {
+        result.n = String(n);
+      }
     } catch (e) {
       // Tolerate files that don't have _gristsys_* yet (although we don't need to).
     }
     try {
-      const tzQuery = await db.get('select timezone from _grist_DocInfo where id = 1');
+      const tzQuery = await db.get(
+        "select timezone from _grist_DocInfo where id = 1"
+      );
       const tz = tzQuery?.timezone;
-      if (tz) { result.tz = tz; }
+      if (tz) {
+        result.tz = tz;
+      }
     } catch (e) {
       // Tolerate files that don't have _grist_DocInfo yet.
     }
@@ -810,9 +982,12 @@ export class HostedStorageManager implements IDocStorageManager {
 
   // Wrap external storage in a checksum-aware decorator this will retry until
   // consistency.
-  private _getChecksummedExternalStorage(family: string, core: ExternalStorage,
-                                         versions: Map<string, string>,
-                                         options: HostedStorageOptions) {
+  private _getChecksummedExternalStorage(
+    family: string,
+    core: ExternalStorage,
+    versions: Map<string, string>,
+    options: HostedStorageOptions
+  ) {
     return new ChecksummedExternalStorage(family, core, {
       maxRetries: 4,
       initialDelayMs: options.secondsBeforeFirstRetry * 1000,
@@ -823,7 +998,7 @@ export class HostedStorageManager implements IDocStorageManager {
         },
         load: async (key) => {
           return await this._docWorkerMap.getChecksum(family, key);
-        }
+        },
       },
       localHash: {
         save: async (key, checksum) => {
@@ -832,20 +1007,21 @@ export class HostedStorageManager implements IDocStorageManager {
         },
         load: async (key) => {
           const fname = this._getHashFile(this.getPath(key), family);
-          if (!await fse.pathExists(fname)) { return null; }
-          return await fse.readFile(fname, 'utf8');
-        }
+          if (!(await fse.pathExists(fname))) {
+            return null;
+          }
+          return await fse.readFile(fname, "utf8");
+        },
       },
       latestVersion: {
         save: async (key, ver) => {
           versions.set(key, ver);
         },
-        load: async (key) => versions.get(key) || null
-      }
+        load: async (key) => versions.get(key) || null,
+      },
     });
   }
 }
-
 
 /**
  * Make a copy of a sqlite database safely and without locking it for long periods, using the
@@ -856,33 +1032,44 @@ export class HostedStorageManager implements IDocStorageManager {
  * @param label: a tag to add to log messages
  * @return dest
  */
-export async function backupSqliteDatabase(src: string, dest: string,
-                                           testProgress?: (e: BackupEvent) => void,
-                                           label?: string,
-                                           logMeta: object = {}): Promise<string> {
-  const _log = new LogMethods<null>('backupSqliteDatabase: ', () => logMeta);
+export async function backupSqliteDatabase(
+  src: string,
+  dest: string,
+  testProgress?: (e: BackupEvent) => void,
+  label?: string,
+  logMeta: object = {}
+): Promise<string> {
+  const _log = new LogMethods<null>("backupSqliteDatabase: ", () => logMeta);
   _log.debug(null, `starting copy of ${src} (${label})`);
-  let db: sqlite3.DatabaseWithBackup|null = null;
+  let db: sqlite3.DatabaseWithBackup | null = null;
   let success: boolean = false;
   let maxStepTimeMs: number = 0;
   let numSteps: number = 0;
   try {
     // NOTE: fse.remove succeeds also when the file does not exist.
-    await fse.remove(dest);  // Just in case some previous process terminated very badly.
-                             // Sqlite will try to open any existing material at this
-                             // path prior to overwriting it.
-    await fromCallback(cb => { db = new sqlite3.Database(dest, cb) as sqlite3.DatabaseWithBackup; });
+    await fse.remove(dest); // Just in case some previous process terminated very badly.
+    // Sqlite will try to open any existing material at this
+    // path prior to overwriting it.
+    await fromCallback((cb) => {
+      db = new sqlite3.Database(dest, cb) as sqlite3.DatabaseWithBackup;
+    });
     // Turn off protections that can slow backup steps.  If the app or OS
     // crashes, the backup may be corrupt.  In Grist use case, if app or OS
     // crashes, no use will be made of backup, so we're OK.
     // This sets flags matching the --async option to .backup in the sqlite3
     // shell program: https://www.sqlite.org/src/info/7b6a605b1883dfcb
-    await fromCallback(cb => db!.exec("PRAGMA synchronous=OFF; PRAGMA journal_mode=OFF;", cb));
-    if (testProgress) { testProgress({action: 'open', phase: 'before'}); }
-    const backup: sqlite3.Backup = db!.backup(src, 'main', 'main', false);
-    if (testProgress) { testProgress({action: 'open', phase: 'after'}); }
+    await fromCallback((cb) =>
+      db!.exec("PRAGMA synchronous=OFF; PRAGMA journal_mode=OFF;", cb)
+    );
+    if (testProgress) {
+      testProgress({ action: "open", phase: "before" });
+    }
+    const backup: sqlite3.Backup = db!.backup(src, "main", "main", false);
+    if (testProgress) {
+      testProgress({ action: "open", phase: "after" });
+    }
     let remaining: number = -1;
-    let prevError: Error|null = null;
+    let prevError: Error | null = null;
     let errorMsgTime: number = 0;
     let restartMsgTime: number = 0;
     for (;;) {
@@ -897,27 +1084,46 @@ export async function backupSqliteDatabase(src: string, dest: string,
       // https://github.com/mapbox/node-sqlite3/pull/1116 for api details.
       numSteps++;
       const stepStart = Date.now();
-      if (remaining >= 0 && backup.remaining > remaining && stepStart - restartMsgTime > 1000) {
+      if (
+        remaining >= 0 &&
+        backup.remaining > remaining &&
+        stepStart - restartMsgTime > 1000
+      ) {
         _log.info(null, `copy of ${src} (${label}) restarted`);
         restartMsgTime = stepStart;
       }
       remaining = backup.remaining;
-      if (testProgress) { testProgress({action: 'step', phase: 'before'}); }
+      if (testProgress) {
+        testProgress({ action: "step", phase: "before" });
+      }
       let isCompleted: boolean = false;
       try {
-        isCompleted = Boolean(await fromCallback(cb => backup.step(PAGES_TO_BACKUP_PER_STEP, cb)));
+        isCompleted = Boolean(
+          await fromCallback((cb) => backup.step(PAGES_TO_BACKUP_PER_STEP, cb))
+        );
       } catch (err) {
-        if (String(err) !== String(prevError) || Date.now() - errorMsgTime > 1000) {
+        if (
+          String(err) !== String(prevError) ||
+          Date.now() - errorMsgTime > 1000
+        ) {
           _log.info(null, `error (${src} ${label}): ${err}`);
           errorMsgTime = Date.now();
         }
         prevError = err;
-        if (backup.failed) { throw new Error(`backupSqliteDatabase (${src} ${label}): internal copy failed`); }
+        if (backup.failed) {
+          throw new Error(
+            `backupSqliteDatabase (${src} ${label}): internal copy failed`
+          );
+        }
       } finally {
         const stepTimeMs = Date.now() - stepStart;
-        if (stepTimeMs > maxStepTimeMs) { maxStepTimeMs = stepTimeMs; }
+        if (stepTimeMs > maxStepTimeMs) {
+          maxStepTimeMs = stepTimeMs;
+        }
       }
-      if (testProgress) { testProgress({action: 'step', phase: 'after'}); }
+      if (testProgress) {
+        testProgress({ action: "step", phase: "after" });
+      }
       if (isCompleted) {
         _log.info(null, `copy of ${src} (${label}) completed successfully`);
         success = true;
@@ -926,9 +1132,13 @@ export async function backupSqliteDatabase(src: string, dest: string,
       await delay(PAUSE_BETWEEN_BACKUP_STEPS_IN_MS);
     }
   } finally {
-    if (testProgress) { testProgress({action: 'close', phase: 'before'}); }
+    if (testProgress) {
+      testProgress({ action: "close", phase: "before" });
+    }
     try {
-      if (db) { await fromCallback(cb => db!.close(cb)); }
+      if (db) {
+        await fromCallback((cb) => db!.close(cb));
+      }
     } catch (err) {
       _log.debug(null, `problem stopping copy of ${src} (${label}): ${err}`);
     }
@@ -941,17 +1151,21 @@ export async function backupSqliteDatabase(src: string, dest: string,
         _log.debug(null, `problem removing copy of ${src} (${label}): ${err}`);
       }
     }
-    if (testProgress) { testProgress({action: 'close', phase: 'after'}); }
-    _log.rawLog('debug', null, `stopped copy of ${src} (${label})`, {maxStepTimeMs, numSteps});
+    if (testProgress) {
+      testProgress({ action: "close", phase: "after" });
+    }
+    _log.rawLog("debug", null, `stopped copy of ${src} (${label})`, {
+      maxStepTimeMs,
+      numSteps,
+    });
   }
   return dest;
 }
-
 
 /**
  * A summary of an event during a backup.  Emitted for test purposes, to check timing.
  */
 export interface BackupEvent {
-  action: 'step' | 'close' | 'open';
-  phase: 'before' | 'after';
+  action: "step" | "close" | "open";
+  phase: "before" | "after";
 }

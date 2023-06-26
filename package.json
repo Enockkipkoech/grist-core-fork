@@ -36,7 +36,6 @@
     "name": "Grist Labs Inc.",
     "email": "info@getgrist.com"
   },
-  "private": false,
   "devDependencies": {
     "@babel/core": "7.18.5",
     "@babel/eslint-parser": "7.18.2",

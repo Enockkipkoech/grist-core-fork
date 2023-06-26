@@ -12,6 +12,12 @@
 /sandbox_venv*
 /.vscode/
 
+
+.yarn/
+_build
+/docs/
+persist/
+
 # Build helper files.
 /.build*
 

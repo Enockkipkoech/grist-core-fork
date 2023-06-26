@@ -11,10 +11,10 @@ export interface ObjSnapshot {
  * short since there is a tight limit on total metadata size in S3.
  */
 export interface ObjMetadata {
-  t?: string;     // timestamp
-  tz?: string;    // timezone
-  h?: string;     // actionHash
-  n?: number;     // actionNum
+  t?: string; // timestamp
+  tz?: string; // timezone
+  h?: string; // actionHash
+  n?: number; // actionNum
   label?: string;
 }
 
@@ -51,7 +51,9 @@ type ExternalMetadata = Record<string, string>;
 export function toExternalMetadata(metadata: ObjMetadata): ExternalMetadata {
   const result: ExternalMetadata = {};
   for (const [key, val] of Object.entries(metadata)) {
-    if (val !== undefined) { result[key] = String(val); }
+    if (val !== undefined) {
+      result[key] = String(val);
+    }
   }
   return result;
 }
@@ -61,9 +63,13 @@ export function toExternalMetadata(metadata: ObjMetadata): ExternalMetadata {
  */
 export function toGristMetadata(metadata: ExternalMetadata): ObjMetadata {
   const result: ObjMetadata = {};
-  for (const key of ['t', 'tz', 'h', 'label'] as const) {
-    if (metadata[key]) { result[key] = metadata[key]; }
+  for (const key of ["t", "tz", "h", "label"] as const) {
+    if (metadata[key]) {
+      result[key] = metadata[key];
+    }
   }
-  if (metadata.n) { result.n = parseInt(metadata.n, 10); }
+  if (metadata.n) {
+    result.n = parseInt(metadata.n, 10);
+  }
   return result;
 }

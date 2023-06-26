@@ -1,4 +1,4 @@
-import {GristDoc} from 'app/client/components/GristDoc';
+    import {GristDoc} from 'app/client/components/GristDoc';
 import {copyToClipboard} from 'app/client/lib/clipboardUtils';
 import {setTestState} from 'app/client/lib/testState';
 import {TableRec} from 'app/client/models/DocModel';
