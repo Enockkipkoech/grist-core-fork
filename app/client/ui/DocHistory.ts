@@ -17,6 +17,7 @@ import {
   dom,
   IDomComponent,
   MultiHolder,
+  observable,
   Observable,
   styled,
 } from "grainjs";
@@ -274,12 +275,12 @@ const cssSnapshotCard = styled(
 `
 );
 
-// const cssDatePart = styled(
-//   "span",
-//   `
-//   display: inline-block;
-// `
-// );
+const cssDatePart = styled(
+  "span",
+  `
+  display: inline-block;
+`
+);
 
 const cssMenuDots = styled(
   "div",
