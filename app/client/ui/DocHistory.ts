@@ -43,6 +43,18 @@ export class DocHistory extends Disposable implements IDomComponent {
     super();
   }
 
+  public debounce<T extends (...args: any[]) => void>(
+    func: T,
+    delay: number
+  ): (...args: Parameters<T>) => void {
+    let timeoutId: NodeJS.Timeout;
+    return (...args: Parameters<T>) => {
+      clearTimeout(timeoutId);
+      timeoutId = setTimeout(() => {
+        func.apply(this, args);
+      }, delay);
+    };
+  }
   public buildDom() {
     const tabs = [
       { value: "activity", label: t("Activity") },
@@ -113,7 +125,7 @@ export class DocHistory extends Disposable implements IDomComponent {
     }
     async function renameDocSnapshot() {
       const snapshotName = await _promptForName();
-      // console.log("Snapshot name", snapshotName);
+      //console.log("Snapshot name", snapshotName);
       return snapshotName;
     }
 
@@ -128,6 +140,11 @@ export class DocHistory extends Disposable implements IDomComponent {
       // Note that most recent snapshots are first.
       dom.domComputed(snapshots, (snapshotList) =>
         snapshotList.map((snapshot, index) => {
+          let inputEl: HTMLInputElement;
+          console.log("inputEl", inputEl!);
+
+          const snapName = observable(snapshot.label || "");
+
           const modified = moment(snapshot.lastModified);
           snapshot.label = "Snapshoot!";
 
@@ -143,33 +160,22 @@ export class DocHistory extends Disposable implements IDomComponent {
                       snapshot.snapshotId === compareSnapshotId)
                 )
               ),
-              dom(
-                "div",
+              dom("div", [
+                cssInput([
+                  cssDatePart(modified.format("ddd ll LT")),
+                  dom.on(
+                    "input",
+                    this.debounce((e, elem) => {
+                      const name = elem.value;
+                      snapName.set(name);
+                      snapshot.label = name || "SnapShot";
+                      const snapValue = snapName.get();
 
-                [
-                  // snapshot.label ?? cssDatePart(modified.format("ddd ll LT")),
-                  cssInput(
-                    dom.on("input", () => {
-                      // Create an observable with an initial value
-                      const nameObs: Observable<string> = Observable.create(
-                        owner,
-                        `Observables are cool!`
-                      );
-                      // snapshot.label = nameObs.get();
-                      console.log("snapName", nameObs.get());
-
-                      // Get the value of the input field
-
-                      // Log the value of the input field
-                    }),
-                    {
-                      placeholder: snapshot.label
-                        ? snapshot.label
-                        : modified.format("ddd ll LT"),
-                    }
+                      console.log(snapValue, "value");
+                    }, 500)
                   ),
-                ]
-              ),
+                ]),
+              ]),
 
               cssMenuDots(
                 icon("Dots"),
