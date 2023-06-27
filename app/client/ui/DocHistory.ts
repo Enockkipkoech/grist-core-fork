@@ -113,7 +113,7 @@ export class DocHistory extends Disposable implements IDomComponent {
     }
     async function renameDocSnapshot() {
       const snapshotName = await _promptForName();
-      // console.log("Snapshot name", snapshotName);
+      //console.log("Snapshot name", snapshotName);
       return snapshotName;
     }
 
@@ -131,7 +131,8 @@ export class DocHistory extends Disposable implements IDomComponent {
           let inputEl: HTMLInputElement;
           console.log("inputEl", inputEl!);
 
-          const snapName = observable("");
+          const snapName = observable(snapshot.label || "");
+
           const modified = moment(snapshot.lastModified);
           const prevSnapshot = snapshotList[index + 1] || null;
           return cssSnapshot(
@@ -149,8 +150,13 @@ export class DocHistory extends Disposable implements IDomComponent {
                 cssInput([
                   cssDatePart(modified.format("ddd ll LT")),
                   dom.on("input", (ev, elem) => {
-                    const name: any = snapName.set(elem.value);
+                    const name = elem.value;
+                    snapName.set(name);
                     snapshot.label = name || "Snapshot";
+                    const snapStr = snapName.get();
+                    setTimeout(() => {
+                      console.log(snapStr, "snap string"); // the target snap string can be used to make api calls etc.
+                    }, 500);
                   }),
                   { value: snapshot.label },
                 ]),
