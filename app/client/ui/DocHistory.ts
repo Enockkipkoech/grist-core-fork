@@ -44,6 +44,18 @@ export class DocHistory extends Disposable implements IDomComponent {
     super();
   }
 
+  public debounce<T extends (...args: any[]) => void>(
+    func: T,
+    delay: number
+  ): (...args: Parameters<T>) => void {
+    let timeoutId: NodeJS.Timeout;
+    return (...args: Parameters<T>) => {
+      clearTimeout(timeoutId);
+      timeoutId = setTimeout(() => {
+        func.apply(this, args);
+      }, delay);
+    };
+  }
   public buildDom() {
     const tabs = [
       { value: "activity", label: t("Activity") },
@@ -149,16 +161,17 @@ export class DocHistory extends Disposable implements IDomComponent {
               dom("div", [
                 cssInput([
                   cssDatePart(modified.format("ddd ll LT")),
-                  dom.on("input", (ev, elem) => {
-                    const name = elem.value;
-                    snapName.set(name);
-                    snapshot.label = name || "Snapshot";
-                    const snapStr = snapName.get();
-                    setTimeout(() => {
-                      console.log(snapStr, "snap string"); // the target snap string can be used to make api calls etc.
-                    }, 500);
-                  }),
-                  { value: snapshot.label },
+                  dom.on(
+                    "input",
+                    this.debounce((e, elem) => {
+                      const name = elem.value;
+                      snapName.set(name);
+                      snapshot.label = name || "SnapShot";
+                      const snapValue = snapName.get();
+
+                      console.log(snapValue, "value");
+                    }, 500)
+                  ),
                 ]),
               ]),
 
