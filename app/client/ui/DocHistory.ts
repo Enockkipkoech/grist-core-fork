@@ -17,13 +17,12 @@ import {
   dom,
   IDomComponent,
   MultiHolder,
-  observable,
   Observable,
   styled,
 } from "grainjs";
 import moment from "moment";
 import { invokePrompt } from "app/client/ui2018/modals";
-import { cssInput } from "app/client/ui/cssInput";
+import { cssInput } from "./cssInput";
 
 const t = makeT("DocHistory");
 
@@ -96,6 +95,7 @@ export class DocHistory extends Disposable implements IDomComponent {
     const snapshots = Observable.create<DocSnapshot[]>(owner, []);
     const snapshotsDenied = Observable.create<boolean>(owner, false);
     const userApi = this._docPageModel.appModel.api;
+
     const docApi = userApi.getDocAPI(origUrlId);
     docApi
       .getSnapshots()
@@ -128,11 +128,9 @@ export class DocHistory extends Disposable implements IDomComponent {
       // Note that most recent snapshots are first.
       dom.domComputed(snapshots, (snapshotList) =>
         snapshotList.map((snapshot, index) => {
-          let inputEl: HTMLInputElement;
-          console.log("inputEl", inputEl!);
-
-          const snapName = observable("");
           const modified = moment(snapshot.lastModified);
+          snapshot.label = "Snapshoot!";
+
           const prevSnapshot = snapshotList[index + 1] || null;
           return cssSnapshot(
             cssSnapshotTime(getTimeFromNow(snapshot.lastModified)),
@@ -145,16 +143,33 @@ export class DocHistory extends Disposable implements IDomComponent {
                       snapshot.snapshotId === compareSnapshotId)
                 )
               ),
-              dom("div", [
-                cssInput([
-                  cssDatePart(modified.format("ddd ll LT")),
-                  dom.on("input", (ev, elem) => {
-                    const name: any = snapName.set(elem.value);
-                    snapshot.label = name || "Snapshot";
-                  }),
-                  { value: snapshot.label },
-                ]),
-              ]),
+              dom(
+                "div",
+
+                [
+                  // snapshot.label ?? cssDatePart(modified.format("ddd ll LT")),
+                  cssInput(
+                    dom.on("input", () => {
+                      // Create an observable with an initial value
+                      const nameObs: Observable<string> = Observable.create(
+                        owner,
+                        `Observables are cool!`
+                      );
+                      // snapshot.label = nameObs.get();
+                      console.log("snapName", nameObs.get());
+
+                      // Get the value of the input field
+
+                      // Log the value of the input field
+                    }),
+                    {
+                      placeholder: snapshot.label
+                        ? snapshot.label
+                        : modified.format("ddd ll LT"),
+                    }
+                  ),
+                ]
+              ),
 
               cssMenuDots(
                 icon("Dots"),
@@ -253,12 +268,12 @@ const cssSnapshotCard = styled(
 `
 );
 
-const cssDatePart = styled(
-  "span",
-  `
-  display: inline-block;
-`
-);
+// const cssDatePart = styled(
+//   "span",
+//   `
+//   display: inline-block;
+// `
+// );
 
 const cssMenuDots = styled(
   "div",

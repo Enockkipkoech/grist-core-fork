@@ -646,6 +646,18 @@ export class HostedStorageManager implements IDocStorageManager {
     };
   }
 
+  public async updateSnapshots(
+    docName: string,
+    snapshotIds: string[]
+  ): Promise<void> {
+    if (this._disableS3) {
+      return;
+    }
+    // change the snapshotIds to be the snapshotId + the docName
+    await this._pruner.prune(docName, snapshotIds);
+  }
+
+
   /**
    * This is called when a document was edited by the user.
    */
