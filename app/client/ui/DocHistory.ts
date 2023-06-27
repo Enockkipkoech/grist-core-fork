@@ -44,6 +44,18 @@ export class DocHistory extends Disposable implements IDomComponent {
     super();
   }
 
+  public debounce<T extends (...args: any[]) => void>(
+    func: T,
+    delay: number
+  ): (...args: Parameters<T>) => void {
+    let timeoutId: NodeJS.Timeout;
+    return (...args: Parameters<T>) => {
+      clearTimeout(timeoutId);
+      timeoutId = setTimeout(() => {
+        func.apply(this, args);
+      }, delay);
+    };
+  }
   public buildDom() {
     const tabs = [
       { value: "activity", label: t("Activity") },
@@ -113,7 +125,7 @@ export class DocHistory extends Disposable implements IDomComponent {
     }
     async function renameDocSnapshot() {
       const snapshotName = await _promptForName();
-      // console.log("Snapshot name", snapshotName);
+      //console.log("Snapshot name", snapshotName);
       return snapshotName;
     }
 
@@ -131,7 +143,8 @@ export class DocHistory extends Disposable implements IDomComponent {
           let inputEl: HTMLInputElement;
           console.log("inputEl", inputEl!);
 
-          const snapName = observable("");
+          const snapName = observable(snapshot.label || "");
+
           const modified = moment(snapshot.lastModified);
           const prevSnapshot = snapshotList[index + 1] || null;
           return cssSnapshot(
@@ -148,11 +161,17 @@ export class DocHistory extends Disposable implements IDomComponent {
               dom("div", [
                 cssInput([
                   cssDatePart(modified.format("ddd ll LT")),
-                  dom.on("input", (ev, elem) => {
-                    const name: any = snapName.set(elem.value);
-                    snapshot.label = name || "Snapshot";
-                  }),
-                  { value: snapshot.label },
+                  dom.on(
+                    "input",
+                    this.debounce((e, elem) => {
+                      const name = elem.value;
+                      snapName.set(name);
+                      snapshot.label = name || "SnapShot";
+                      const snapValue = snapName.get();
+
+                      console.log(snapValue, "value");
+                    }, 500)
+                  ),
                 ]),
               ]),
 
