@@ -141,13 +141,9 @@ export class DocHistory extends Disposable implements IDomComponent {
       // Note that most recent snapshots are first.
       dom.domComputed(snapshots, (snapshotList) =>
         snapshotList.map((snapshot, index) => {
-          let inputEl: HTMLInputElement;
-          console.log("inputEl", inputEl!);
-
           const snapName = observable(snapshot.label || "");
 
           const modified = moment(snapshot.lastModified);
-          snapshot.label = "Snapshoot!";
 
           const prevSnapshot = snapshotList[index + 1] || null;
           return cssSnapshot(
@@ -162,19 +158,29 @@ export class DocHistory extends Disposable implements IDomComponent {
                 )
               ),
               dom("div", [
+                // cssDatePart(modified.format("ddd ll LT")),
                 cssInput([
-                  cssDatePart(modified.format("ddd ll LT")),
                   dom.on(
                     "input",
                     this.debounce((e, elem) => {
                       const name = elem.value;
                       snapName.set(name);
-                      snapshot.label = name || "SnapShot";
                       const snapValue = snapName.get();
+                      snapshot.label = snapValue;
 
                       console.log(snapValue, "value");
-                    }, 500)
+                    }, 500),
+
+                    {
+                      useCapture: true,
+                    }
                   ),
+
+                  {
+                    placeholder: snapName.get()
+                      ? snapName.get()
+                      : modified.format("ddd ll LT"),
+                  },
                 ]),
               ]),
 
@@ -275,12 +281,12 @@ const cssSnapshotCard = styled(
 `
 );
 
-const cssDatePart = styled(
-  "span",
-  `
-  display: inline-block;
-`
-);
+// const cssDatePart = styled(
+//   "span",
+//   `
+//   display: inline-block;
+// `
+// );
 
 const cssMenuDots = styled(
   "div",
