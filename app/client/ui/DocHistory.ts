@@ -23,11 +23,16 @@ import {
 } from "grainjs";
 import moment from "moment";
 import { invokePrompt } from "app/client/ui2018/modals";
-import { cssInput } from "./cssInput";
+import { cssEditorInput } from "./HomeLeftPane";
+// import { cssInput } from "./cssInput";
 
 const t = makeT("DocHistory");
 
 const DocHistorySubTab = StringUnion("activity", "snapshots");
+
+export interface DocHistoryActions {
+  onRename: (name: string) => Promise<void> | any;
+}
 
 export class DocHistory extends Disposable implements IDomComponent {
   private _subTab = createSessionObs(
@@ -142,6 +147,8 @@ export class DocHistory extends Disposable implements IDomComponent {
       dom.domComputed(snapshots, (snapshotList) =>
         snapshotList.map((snapshot, index) => {
           const snapName = observable(snapshot.label || "");
+          snapshot.label = snapName.get();
+          const isRenaming = observable(false);
 
           const modified = moment(snapshot.lastModified);
 
@@ -159,7 +166,58 @@ export class DocHistory extends Disposable implements IDomComponent {
               ),
               dom("div", [
                 // cssDatePart(modified.format("ddd ll LT")),
-                cssInput([
+                // cssInput([
+                //   () =>
+                //     dom.on(
+                //       "input",
+                //       this.debounce((e, elem) => {
+                //         const name = elem.value;
+                //         snapName.set(name);
+                //         const snapValue = snapName.get();
+                //         snapshot.label = snapValue;
+                //         console.log(snapValue, "value");
+                //       }, 500),
+                //       {
+                //         useCapture: true,
+                //       }
+                //     ),
+                //   {
+                //     placeholder: snapshot.label ? snapshot.label : "",
+                //   },
+                // ]),
+
+                // dom.on(
+                //   "input",
+                //   this.debounce((e, elem) => {
+                //     const name = elem.value;
+                //     snapName.set(name);
+                //     const snapValue = snapName.get();
+                //     snapshot.label = snapValue;
+                //     console.log(snapValue, "value");
+                //   }, 500),
+                //   {
+                //     useCapture: true,
+                //   }
+                // ),
+
+                cssEditorInput(
+                  {
+                    initialValue:
+                      snapshot.label || `${modified.format("ddd ll LT")}`,
+                    save: () => {
+                      this.debounce((e, elem) => {
+                        const name = elem.value;
+                        snapName.set(name);
+                        const snapValue = snapName.get();
+                        snapshot.label = snapValue;
+                        // console.log(snapValue, "value");
+                      }, 500);
+                    },
+                    close: () => {
+                      isRenaming.set(false);
+                      console.log("close");
+                    },
+                  },
                   dom.on(
                     "input",
                     this.debounce((e, elem) => {
@@ -167,21 +225,15 @@ export class DocHistory extends Disposable implements IDomComponent {
                       snapName.set(name);
                       const snapValue = snapName.get();
                       snapshot.label = snapValue;
-
                       console.log(snapValue, "value");
-                    }, 500),
-
-                    {
-                      useCapture: true,
-                    }
+                    }, 500)
                   ),
-
-                  {
-                    placeholder: snapName.get()
-                      ? snapName.get()
-                      : modified.format("ddd ll LT"),
-                  },
-                ]),
+                  dom.on("mousedown", (ev) => ev.stopPropagation()),
+                  dom.on("click", (ev) => {
+                    ev.stopPropagation();
+                    ev.preventDefault();
+                  })
+                ),
               ]),
 
               cssMenuDots(
