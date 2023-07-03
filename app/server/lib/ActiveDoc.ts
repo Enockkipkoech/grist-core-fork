@@ -2234,21 +2234,6 @@ export class ActiveDoc extends EventEmitter implements AssistanceDoc {
     );
   }
 
-  public async updateSnapshots(
-    docSession: OptDocSession,
-    snapshotIds: string[],
-    label: string
-  ): Promise<void> {
-    if (!(await this.isOwner(docSession))) {
-      throw new Error("cannot update snapshots, access denied");
-    }
-    return this._docManager.storageManager.updateSnapshots(
-      this.docName,
-      snapshotIds,
-      label
-    );
-  }
-
   public async deleteActions(
     docSession: OptDocSession,
     keepN: number

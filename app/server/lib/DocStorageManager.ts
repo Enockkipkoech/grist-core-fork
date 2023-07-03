@@ -311,13 +311,6 @@ export class DocStorageManager implements IDocStorageManager {
     throw new Error("removeSnapshots not implemented");
   }
 
-  public updateSnapshots(
-    docName: string,
-    snapshotIds: string[],
-    label: string
-  ): Promise<void> {
-    throw new Error("updateSnapshots not implemented");
-  }
   public async replace(docName: string, options: any): Promise<void> {
     throw new Error("replacement not implemented");
   }

@@ -1176,49 +1176,6 @@ export class DocWorkerApi {
     );
 
     this._app.post(
-      "/api/docs/:docId/snapshots/update",
-      isOwner,
-      withDoc(async (activeDoc, req, res) => {
-        const docSession = docSessionFromRequest(req);
-        const snapshotIds = req.body.snapshotIds as string[];
-        const label = req.body.label as string;
-        if (snapshotIds) {
-          await activeDoc.updateSnapshots(docSession, snapshotIds, label);
-          res.json({ snapshotIds, label });
-          return;
-        }
-        if (req.body.select === "unlisted") {
-          // Remove any snapshots not listed in inventory.  Ideally, there should be no
-          // snapshots, and this undocumented feature is just for fixing up problems.
-          const full = (
-            await activeDoc.getSnapshots(docSession, true)
-          ).snapshots.map((s) => s.snapshotId);
-          const listed = new Set(
-            (await activeDoc.getSnapshots(docSession)).snapshots.map(
-              (s) => s.snapshotId
-            )
-          );
-          const unlisted = full.filter((snapshotId) => !listed.has(snapshotId));
-          await activeDoc.updateSnapshots(docSession, unlisted, label);
-          res.json({ snapshotIds: unlisted, label });
-          return;
-        }
-        if (req.body.select === "past") {
-          // Rename the latest snapshot.  Useful for sanitizing history if something
-          // bad snuck into previous snapshots and they are not valuable to preserve.
-          const past = (
-            await activeDoc.getSnapshots(docSession, true)
-          ).snapshots.map((s) => s.snapshotId);
-          past.shift(); // update current version.
-          await activeDoc.updateSnapshots(docSession, past, label);
-          res.json({ snapshotIds: past });
-          return;
-        }
-        throw new Error("please specify snapshotIds to update");
-      })
-    );
-
-    this._app.post(
       "/api/docs/:docId/flush",
       canEdit,
       throttled(async (req, res) => {

@@ -489,8 +489,6 @@ export interface DocAPI {
     snapshotIds: string[] | "unlisted" | "past"
   ): Promise<{ snapshotIds: string[] }>;
 
-  // Update the document's metadata, including the name, description, and tags.
-  updateSnapshots(snapshotId: string[] | "unlisted" | "past"): Promise<void>;
   forceReload(): Promise<void>;
   recover(recoveryMode: boolean): Promise<void>;
   // Compare two documents, optionally including details of the changes.
@@ -1119,14 +1117,6 @@ export class DocAPIImpl extends BaseAPI implements DocAPI {
         ? { select: snapshotIds }
         : { snapshotIds };
     return await this.requestJson(`${this._url}/snapshots/remove`, {
-      method: "POST",
-      body: JSON.stringify(body),
-    });
-  }
-
-  public async updateSnapshots(label: string[] | "unlisted" | "past") {
-    const body = typeof label === "string" ? { select: label } : { label };
-    return await this.requestJson(`${this._url}/snapshots/update`, {
       method: "POST",
       body: JSON.stringify(body),
     });

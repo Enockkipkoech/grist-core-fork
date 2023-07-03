@@ -43,11 +43,7 @@ export interface IDocStorageManager {
     skipMetadataCache?: boolean
   ): Promise<DocSnapshots>;
   removeSnapshots(docName: string, snapshotIds: string[]): Promise<void>;
-  updateSnapshots(
-    docName: string,
-    snapshotIds: string[],
-    Label: string
-  ): Promise<void>;
+
   replace(docName: string, options: DocReplacementOptions): Promise<void>;
 }
 
@@ -106,9 +102,7 @@ export class TrivialDocStorageManager implements IDocStorageManager {
   public async removeSnapshots(): Promise<never> {
     throw new Error("no");
   }
-  public async updateSnapshots(): Promise<never> {
-    throw new Error("no");
-  }
+
   public async replace(): Promise<never> {
     throw new Error("no");
   }

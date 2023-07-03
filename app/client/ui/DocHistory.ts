@@ -166,39 +166,6 @@ export class DocHistory extends Disposable implements IDomComponent {
               ),
               dom("div", [
                 // cssDatePart(modified.format("ddd ll LT")),
-                // cssInput([
-                //   () =>
-                //     dom.on(
-                //       "input",
-                //       this.debounce((e, elem) => {
-                //         const name = elem.value;
-                //         snapName.set(name);
-                //         const snapValue = snapName.get();
-                //         snapshot.label = snapValue;
-                //         console.log(snapValue, "value");
-                //       }, 500),
-                //       {
-                //         useCapture: true,
-                //       }
-                //     ),
-                //   {
-                //     placeholder: snapshot.label ? snapshot.label : "",
-                //   },
-                // ]),
-
-                // dom.on(
-                //   "input",
-                //   this.debounce((e, elem) => {
-                //     const name = elem.value;
-                //     snapName.set(name);
-                //     const snapValue = snapName.get();
-                //     snapshot.label = snapValue;
-                //     console.log(snapValue, "value");
-                //   }, 500),
-                //   {
-                //     useCapture: true,
-                //   }
-                // ),
 
                 cssEditorInput(
                   {
